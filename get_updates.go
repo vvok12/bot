@@ -14,15 +14,19 @@ const (
 	maxTimeoutAfterError = time.Second * 5
 )
 
-type getUpdatesParams struct {
-	Offset         int64    `json:"offset,omitempty"`
+type configurableGetUpdateParams struct {
 	Limit          int      `json:"limit,omitempty"`
-	Timeout        int      `json:"timeout,omitempty"`
 	AllowedUpdates []string `json:"allowed_updates,omitempty"`
 }
 
+type getUpdatesParams struct {
+	configurableGetUpdateParams `json:"-,flatten"`
+	Offset                      int64 `json:"offset,omitempty"`
+	Timeout                     int   `json:"timeout,omitempty"`
+}
+
 // GetUpdates https://core.telegram.org/bots/api#getupdates
-func (b *Bot) getUpdates(ctx context.Context, wg *sync.WaitGroup) {
+func (b *Bot) getUpdates(ctx context.Context, wg *sync.WaitGroup, params ...*configurableGetUpdateParams) {
 	defer wg.Done()
 
 	var timeoutAfterError time.Duration
@@ -45,14 +49,10 @@ func (b *Bot) getUpdates(ctx context.Context, wg *sync.WaitGroup) {
 			}
 		}
 
-		params := &getUpdatesParams{
-			Timeout: int((b.pollTimeout - time.Second).Seconds()),
-			Offset:  atomic.LoadInt64(&b.lastUpdateID) + 1,
-		}
-
 		var updates []*models.Update
 
-		errRequest := b.rawRequest(ctx, "getUpdates", params, &updates)
+		getUpdatesParams := b.buildGetUpdatesParams(params...)
+		errRequest := b.rawRequest(ctx, "getUpdates", getUpdatesParams, &updates)
 		if errRequest != nil {
 			if errors.Is(errRequest, context.Canceled) {
 				return
@@ -73,6 +73,22 @@ func (b *Bot) getUpdates(ctx context.Context, wg *sync.WaitGroup) {
 			}
 		}
 	}
+}
+
+func (b *Bot) buildGetUpdatesParams(params ...*StartParams) *getUpdatesParams {
+	result := &getUpdatesParams{
+		Timeout: int((b.pollTimeout - time.Second).Seconds()),
+		Offset:  atomic.LoadInt64(&b.lastUpdateID) + 1,
+	}
+
+	if len(params) > 0 {
+		p := params[0]
+
+		result.AllowedUpdates = p.AllowedUpdates
+		result.Limit = p.Limit
+	}
+
+	return result
 }
 
 func incErrTimeout(timeout time.Duration) time.Duration {

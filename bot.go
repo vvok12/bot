@@ -96,8 +96,19 @@ func New(token string, options ...Option) (*Bot, error) {
 	return b, nil
 }
 
+type StartWebhookParams = SetWebhookParams
+
 // StartWebhook starts the Bot with webhook mode
-func (b *Bot) StartWebhook(ctx context.Context) {
+func (b *Bot) StartWebhook(ctx context.Context, params ...*StartWebhookParams) {
+	if len(params) > 0 {
+		p := params[0]
+
+		result, err := b.SetWebhook(ctx, p)
+		if !result || err != nil {
+			panic("failed to set webhook. program terminated")
+		}
+	}
+
 	wg := &sync.WaitGroup{}
 
 	wg.Add(1)
@@ -106,13 +117,15 @@ func (b *Bot) StartWebhook(ctx context.Context) {
 	wg.Wait()
 }
 
+type StartParams = configurableGetUpdateParams
+
 // Start the bot
-func (b *Bot) Start(ctx context.Context) {
+func (b *Bot) Start(ctx context.Context, params ...*StartParams) {
 	wg := &sync.WaitGroup{}
 
 	wg.Add(2)
 	go b.waitUpdates(ctx, wg)
-	go b.getUpdates(ctx, wg)
+	go b.getUpdates(ctx, wg, params...)
 
 	wg.Wait()
 }

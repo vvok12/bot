@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"reflect"
 	"strings"
+	"unsafe"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -21,15 +22,34 @@ var inputMediaInterface = reflect.TypeOf(new(models.InputMedia)).Elem()
 // buildRequestForm builds form-data for request
 // if params contains InputFile of type InputFileUpload, it will be added to form-data ad upload file. Also, for InputMedia attachments
 func buildRequestForm(form *multipart.Writer, params any) (int, error) {
-	v := reflect.ValueOf(params).Elem()
+	v := reflect.ValueOf(params)
+	if v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
 
 	var fieldsCount int
 
 	for i := 0; i < v.NumField(); i++ {
 		jsonTag := v.Type().Field(i).Tag.Get("json")
-		if jsonTag == "-" || jsonTag == "" {
+		if jsonTag == "" {
 			continue
 		}
+		if strings.HasPrefix(jsonTag, "-") {
+			flatten := strings.Contains(jsonTag, ",flatten")
+			if !flatten {
+				continue
+			}
+
+			maybeunexported := getUnexportedField(v.Field(i))
+			fc, err := buildRequestForm(form, maybeunexported)
+			if err != nil {
+				return 0, err
+			}
+
+			fieldsCount += fc
+			continue
+		}
+
 		fieldName := strings.Split(jsonTag, ",")[0]
 		omitempty := strings.Contains(jsonTag, ",omitempty")
 
@@ -188,4 +208,8 @@ func addFormFieldString(form *multipart.Writer, fieldName string, value string) 
 	}
 	_, errCopy := io.Copy(w, strings.NewReader(value))
 	return errCopy
+}
+
+func getUnexportedField(field reflect.Value) interface{} {
+	return reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Interface()
 }
